@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LINE売上分析アプリ (Lite版)</title>
+    
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="favicon.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+    <style>
+        /* 背景はクリーンな白固定 */
+        body { background-color: #ffffff; font-family: sans-serif; }
+        .chart-container { position: relative; height: 250px; width: 100%; }
+        .monthly-chart-container { position: relative; height: 350px; width: 100%; }
+        @media (min-width: 768px) { 
+            .chart-container { height: 300px; } 
+            .monthly-chart-container { height: 400px; }
+        }
+    </style>
+</head>
+<body class="text-gray-800 pb-4">
+
+    <header class="bg-[#00C300] text-white shadow-md sticky top-0 z-10">
+        <div class="max-w-6xl mx-auto flex items-center justify-between px-4">
+            <div class="flex items-center">
+                <img src="top-left.png" alt="シーサーアイコン" class="h-16 w-auto block object-contain">
+                <h1 class="text-lg md:text-xl font-bold ml-3 py-4">LINE Sales Analytics (Lite)</h1>
+            </div>
+            <a href="https://aalinezipmaker.netlify.app/" target="_blank" rel="noopener noreferrer" class="text-xs md:text-sm font-bold text-white hover:text-green-100 transition">
+                🔗スタンプ/絵文字 ZIPメーカー
+            </a>
+        </div>
+    </header>
+    
+    <main class="p-4 max-w-6xl mx-auto space-y-6">
+        
+        <div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200">
+            <div class="flex flex-col gap-6">
+                <div>
+                    <label class="block mb-2 text-sm font-bold text-gray-700">1. CSVファイルを一括選択 (最大6ヶ月分):</label>
+                    <input type="file" id="csvFileInput" multiple accept=".csv" class="block w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0
+                        file:text-sm file:font-bold file:bg-green-50 file:text-[#00C300]
+                        hover:file:bg-green-100 cursor-pointer transition" />
+                </div>
+                
+                <div>
+                    <label class="block mb-2 text-sm font-bold text-gray-700">2. 表示する月を選択 (複数選択可):</label>
+                    <div id="monthFilterContainer" class="flex flex-wrap gap-2">
+                        <span class="text-sm text-gray-400">※CSVを読み込むとここに月ボタンが表示されます</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-[#00C300]">
+                <p class="text-xs text-gray-500 font-bold">総収益 (円)</p>
+                <p class="text-xl md:text-2xl font-black text-gray-800 mt-1" id="kpiRevenue">¥0</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-green-500">
+                <p class="text-xs text-gray-500 font-bold">総販売数 (件)</p>
+                <p class="text-xl md:text-2xl font-black text-gray-800 mt-1" id="kpiSalesCount">0</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-yellow-500 col-span-2 md:col-span-1">
+                <p class="text-xs text-gray-500 font-bold">No.1 売上アイテム</p>
+                <p class="text-sm md:text-base font-bold text-gray-800 mt-1 truncate" id="kpiTopItem">-</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+            
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 lg:col-span-2">
+                <div class="flex justify-between items-center border-b pb-2 mb-4">
+                    <h2 class="text-sm md:text-base font-bold text-gray-700">📅 月別収益推移</h2>
+                    <div class="flex items-center gap-3">
+                        <button onclick="downloadChart('monthlyChart', '月別収益推移')" class="text-xs font-bold text-[#00C300] hover:text-[#009900] flex items-center gap-1 active:scale-95 transition">
+                            📥 画像保存
+                        </button>
+                        <select id="monthlyCategorySelect" class="p-1.5 border border-gray-300 rounded-lg bg-gray-50 text-xs font-bold text-gray-700 cursor-pointer focus:ring-[#00C300] focus:border-[#00C300]">
+                            <option value="ALL">すべてのカテゴリ (積み上げ)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="monthly-chart-container"><canvas id="monthlyChart"></canvas></div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <div class="flex justify-between items-center border-b pb-2 mb-4">
+                    <h2 class="text-sm md:text-base font-bold text-gray-700">🎨 種類シェア</h2>
+                    <button onclick="downloadChart('typeChart', '種類別シェア')" class="text-xs font-bold text-[#00C300] hover:text-[#009900] active:scale-95 transition">
+                        📥 保存
+                    </button>
+                </div>
+                <div class="chart-container"><canvas id="typeChart"></canvas></div>
+            </div>
+            
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <div class="flex justify-between items-center border-b pb-2 mb-4">
+                    <h2 class="text-sm md:text-base font-bold text-gray-700">📊 カテゴリ別 総売上比較</h2>
+                    <button onclick="downloadChart('categorySummaryChart', 'カテゴリ別総売上比較')" class="text-xs font-bold text-[#00C300] hover:text-[#009900] flex items-center gap-1 active:scale-95 transition">
+                        📥 画像保存
+                    </button>
+                </div>
+                <div class="chart-container" style="height: 180px;"><canvas id="categorySummaryChart"></canvas></div>
+            </div>
+            
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 lg:col-span-2">
+                <div class="flex justify-between items-center border-b pb-2 mb-4">
+                    <h2 class="text-sm md:text-base font-bold text-gray-700" id="categoryRankChartTitle">🏆 カテゴリ別 売上ランキング (Top 5)</h2>
+                    <div class="flex items-center gap-3">
+                        <button onclick="downloadChart('categoryRankChart', 'カテゴリ別売上ランキング_' + document.getElementById('categoryRankSelect').value)" class="text-xs font-bold text-[#00C300] hover:text-[#009900] flex items-center gap-1 active:scale-95 transition">
+                            📥 画像保存
+                        </button>
+                        <select id="categoryRankSelect" class="p-1.5 border border-gray-300 rounded-lg bg-gray-50 text-xs font-bold text-gray-700 cursor-pointer focus:ring-[#00C300] focus:border-[#00C300]">
+                        </select>
+                    </div>
+                </div>
+                <div class="chart-container"><canvas id="categoryRankChart"></canvas></div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <div class="flex justify-between items-center border-b pb-2 mb-4">
+                    <h2 class="text-sm md:text-base font-bold text-gray-700">👑 全体収益ランキング (Top 5)</h2>
+                    <button onclick="downloadChart('itemChart', '全体収益ランキング')" class="text-xs font-bold text-[#00C300] hover:text-[#009900] flex items-center gap-1 active:scale-95 transition">
+                        📥 画像保存
+                    </button>
+                </div>
+                <div class="chart-container"><canvas id="itemChart"></canvas></div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <div class="flex justify-between items-center border-b pb-2 mb-4">
+                    <h2 class="text-sm md:text-base font-bold text-gray-700">🛍️ 全体販売数ランキング (Top 5)</h2>
+                    <button onclick="downloadChart('salesCountChart', '全体販売数ランキング')" class="text-xs font-bold text-[#00C300] hover:text-[#009900] flex items-center gap-1 active:scale-95 transition">
+                        📥 画像保存
+                    </button>
+                </div>
+                <div class="chart-container"><canvas id="salesCountChart"></canvas></div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <footer class="max-w-6xl mx-auto px-4 py-6 text-xs text-gray-400 border-t border-gray-100 mt-12 flex flex-col sm:flex-row justify-end items-center sm:items-end gap-2">
+        <p class="leading-none pb-0.5">© 2026 <a href="https://store.line.me/search/ja?q=arakakiai" target="_blank" rel="noopener noreferrer" class="text-[#00C300] hover:text-[#009900] transition font-bold">ARAKAKIAIworks</a>. All Rights Reserved.</p>
+        <img src="bottom-right.png" alt="シーサーロゴ" class="h-9 w-auto object-contain block">
+    </footer>
+
+    <script>
+        Chart.register(ChartDataLabels);
+
+        const fileInput = document.getElementById('csvFileInput');
+        const monthlyCategorySelect = document.getElementById('monthlyCategorySelect');
+        const categoryRankSelect = document.getElementById('categoryRankSelect');
+        
+        let globalData = []; 
+        let availableMonths = [];
+        let selectedMonths = new Set();
+        const charts = {};
+        let globalItemTypes = {}; 
+        let categoryCounts = {}; 
+        let currentItemsRevByType = {}; 
+
+        const typeColors = {
+            "Sticker": { bg: "rgba(236, 72, 153, 0.8)", border: "rgba(236, 72, 153, 1)" }, 
+            "Emoji": { bg: "rgba(139, 92, 246, 0.8)", border: "rgba(139, 92, 246, 1)" },   
+            "Theme": { bg: "rgba(99, 102, 241, 0.8)", border: "rgba(99, 102, 241, 1)" }    
+        };
+        const defaultColor = { bg: "rgba(156, 163, 175, 0.8)", border: "rgba(156, 163, 175, 1)" };
+
+        const whiteBackgroundPlugin = {
+            id: 'whiteBackground',
+            beforeDraw: (chart) => {
+                const { ctx, width, height } = chart;
+                ctx.save();
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, width, height);
+                ctx.restore();
+            }
+        };
+
+        function downloadChart(canvasId, title) {
+            const chart = charts[canvasId];
+            if (!chart) return;
+            
+            const now = new Date();
+            const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+            const imageURI = chart.toBase64Image();
+            
+            const link = document.createElement('a');
+            link.download = `${title}_${dateStr}.png`;
+            link.href = imageURI;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function createChart(canvasId, type, labels, data, label, colors, extraOptions = {}) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            if (charts[canvasId]) charts[canvasId].destroy();
+
+            const isPie = type === 'pie' || type === 'doughnut';
+            const isSalesCount = canvasId === 'salesCountChart';
+            const isCategorySummary = canvasId === 'categorySummaryChart'; 
+
+            const config = {
+                type: type,
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: label,
+                        data: data,
+                        backgroundColor: colors.bg,
+                        borderColor: colors.border,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { display: isPie },
+                        datalabels: {
+                            color: isPie ? '#ffffff' : '#374151', 
+                            font: { weight: 'bold', size: 10 },
+                            anchor: isPie ? 'center' : 'end', 
+                            align: isPie ? 'center' : 'end',
+                            formatter: (value, context) => {
+                                if (value === 0) return '';
+                                if (isCategorySummary) {
+                                    const rawKey = context.chart.data.rawKeys ? context.chart.data.rawKeys[context.dataIndex] : '';
+                                    const count = categoryCounts[rawKey] || 0;
+                                    return '¥' + value.toLocaleString() + ' (' + count.toLocaleString() + '個)';
+                                }
+                                return isSalesCount ? value.toLocaleString() : '¥' + value.toLocaleString();
+                            }
+                        }
+                    },
+                    ...extraOptions
+                },
+                plugins: [whiteBackgroundPlugin]
+            };
+            charts[canvasId] = new Chart(ctx, config);
+        }
+
+        fileInput.addEventListener('change', (event) => {
+            const files = event.target.files;
+            if (files.length === 0) return;
+
+            // ★制限：最大6ヶ月（半年）分まで
+            if (files.length > 6) {
+                alert("【Lite版の制限】\n無料版で一度に分析できるデータは「最大6ヶ月分」までです。");
+                event.target.value = "";
+                return;
+            }
+
+            let parsedData = [];
+            let filesRead = 0;
+
+            Array.from(files).forEach(file => {
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        parsedData = parsedData.concat(results.data);
+                        filesRead++;
+                        if (filesRead === files.length) {
+                            globalData = parsedData;
+                            setupFilters();
+                            renderDashboard();
+                        }
+                    }
+                });
+            });
+        });
+
+        monthlyCategorySelect.addEventListener('change', () => { renderDashboard(); });
+        categoryRankSelect.addEventListener('change', () => { drawCategoryRankChart(); });
+
+        function setupFilters() {
+            const months = new Set();
+            const types = new Set();
+            
+            globalData.forEach(row => {
+                const dateStr = row["From (GMT+9:00)"];
+                if (dateStr) months.add(dateStr.substring(0, 7));
+                if (row["Type"]) types.add(row["Type"]);
+            });
+            
+            availableMonths = Array.from(months).sort();
+            selectedMonths = new Set(availableMonths); 
+
+            const container = document.getElementById('monthFilterContainer');
+            container.innerHTML = '';
+
+            const toggleAllBtn = document.createElement('button');
+            toggleAllBtn.textContent = 'すべて選択 / 解除';
+            toggleAllBtn.className = 'px-4 py-1.5 text-xs md:text-sm font-bold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition border border-gray-300 mr-2';
+            toggleAllBtn.onclick = () => {
+                if (selectedMonths.size === availableMonths.length) {
+                    selectedMonths.clear(); 
+                } else {
+                    selectedMonths = new Set(availableMonths); 
+                }
+                updateFilterUI();
+                renderDashboard();
+            };
+            container.appendChild(toggleAllBtn);
+
+            availableMonths.forEach(month => {
+                const btn = document.createElement('button');
+                btn.textContent = month;
+                btn.className = 'month-btn px-4 py-1.5 text-xs md:text-sm font-bold rounded-full transition border';
+                btn.dataset.month = month;
+                
+                btn.onclick = () => {
+                    if (selectedMonths.has(month)) {
+                        selectedMonths.delete(month); 
+                    } else {
+                        selectedMonths.add(month); 
+                    }
+                    updateFilterUI();
+                    renderDashboard();
+                };
+                container.appendChild(btn);
+            });
+
+            updateFilterUI();
+
+            const typeList = Array.from(types).sort();
+            
+            // 月別セレクトの初期化
+            const lastMonthlySelected = monthlyCategorySelect.value;
+            monthlyCategorySelect.innerHTML = '<option value="ALL">すべてのカテゴリ (積み上げ)</option>';
+            typeList.forEach(type => {
+                const option = document.createElement('option');
+                option.value = type;
+                option.textContent = type === 'Sticker' ? 'スタンプ (Sticker)' : type === 'Emoji' ? '絵文字 (Emoji)' : type === 'Theme' ? '着せかえ (Theme)' : type;
+                monthlyCategorySelect.appendChild(option);
+            });
+            if (typeList.includes(lastMonthlySelected)) monthlyCategorySelect.value = lastMonthlySelected;
+
+            // カテゴリ別ランキング用セレクトの初期化
+            const lastRankSelected = categoryRankSelect.value;
+            categoryRankSelect.innerHTML = '';
+            typeList.forEach(type => {
+                const option = document.createElement('option');
+                option.value = type;
+                option.textContent = type === 'Sticker' ? 'スタンプ (Sticker)' : type === 'Emoji' ? '絵文字 (Emoji)' : type === 'Theme' ? '着せかえ (Theme)' : type;
+                categoryRankSelect.appendChild(option);
+            });
+            if (typeList.includes(lastRankSelected)) {
+                categoryRankSelect.value = lastRankSelected;
+            } else if (typeList.length > 0) {
+                categoryRankSelect.value = typeList[0];
+            }
+        }
+
+        function updateFilterUI() {
+            const btns = document.querySelectorAll('.month-btn');
+            btns.forEach(btn => {
+                const m = btn.dataset.month;
+                if (selectedMonths.has(m)) {
+                    btn.classList.add('bg-[#00C300]', 'text-white', 'border-[#00C300]');
+                    btn.classList.remove('bg-white', 'text-gray-500', 'border-gray-300');
+                } else {
+                    btn.classList.remove('bg-[#00C300]', 'text-white', 'border-[#00C300]');
+                    btn.classList.add('bg-white', 'text-gray-500', 'border-gray-300');
+                }
+            });
+        }
+
+        function renderDashboard() {
+            let totalRevenue = 0;
+            let totalSalesCount = 0;
+            
+            const monthlyByType = {}; 
+            const allTypesFound = new Set(); 
+            
+            const itemsRev = {};
+            const itemsCount = {};
+            const types = {};
+            globalItemTypes = {}; 
+            categoryCounts = {}; 
+            currentItemsRevByType = {}; 
+            
+            globalData.forEach(row => {
+                const dateStr = row["From (GMT+9:00)"];
+                if (!dateStr) return;
+                const month = dateStr.substring(0, 7); 
+                
+                if (!selectedMonths.has(month)) return;
+
+                const revenue = parseFloat(row["Revenue Share"]) || 0;
+                const count = parseInt(row["Sales Counts"]) || 0;
+                const title = row["Item Title"] || "不明";
+                const type = row["Type"] || "不明";
+
+                globalItemTypes[title] = type; 
+
+                totalRevenue += revenue;
+                totalSalesCount += count;
+
+                if (!monthlyByType[month]) monthlyByType[month] = {};
+                monthlyByType[month][type] = (monthlyByType[month][type] || 0) + revenue;
+                allTypesFound.add(type);
+
+                itemsRev[title] = (itemsRev[title] || 0) + revenue;
+                itemsCount[title] = (itemsCount[title] || 0) + count;
+                types[type] = (types[type] || 0) + revenue;
+                categoryCounts[type] = (categoryCounts[type] || 0) + count; 
+
+                if (!currentItemsRevByType[type]) currentItemsRevByType[type] = {};
+                currentItemsRevByType[type][title] = (currentItemsRevByType[type][title] || 0) + revenue;
+            });
+
+            document.getElementById('kpiRevenue').textContent = `¥${Math.floor(totalRevenue).toLocaleString()}`;
+            document.getElementById('kpiSalesCount').textContent = totalSalesCount.toLocaleString();
+            const topItem = Object.keys(itemsRev).sort((a, b) => itemsRev[b] - itemsRev[a])[0];
+            document.getElementById('kpiTopItem').textContent = topItem || "-";
+
+            const sortedMonths = Object.keys(monthlyByType).sort();
+            const typeList = Array.from(allTypesFound).sort();
+            const targetMonthlyCat = monthlyCategorySelect.value || 'ALL';
+            
+            let stackedDatasets = [];
+
+            if (targetMonthlyCat === 'ALL') {
+                stackedDatasets = typeList.map(type => {
+                    const color = typeColors[type] || defaultColor;
+                    return {
+                        label: type === 'Sticker' ? 'スタンプ' : type === 'Emoji' ? '絵文字' : type === 'Theme' ? '着せかえ' : type,
+                        data: sortedMonths.map(m => monthlyByType[m][type] || 0),
+                        backgroundColor: color.bg,
+                        borderColor: color.border,
+                        borderWidth: 1
+                    };
+                });
+            } else {
+                const color = typeColors[targetMonthlyCat] || defaultColor;
+                stackedDatasets = [{
+                    label: targetMonthlyCat === 'Sticker' ? 'スタンプ' : targetMonthlyCat === 'Emoji' ? '絵文字' : targetMonthlyCat === 'Theme' ? '着せかえ' : targetMonthlyCat,
+                    data: sortedMonths.map(m => monthlyByType[m][targetMonthlyCat] || 0),
+                    backgroundColor: color.bg,
+                    borderColor: color.border,
+                    borderWidth: 1
+                }];
+            }
+
+            const ctxMonthly = document.getElementById('monthlyChart').getContext('2d');
+            if (charts['monthlyChart']) charts['monthlyChart'].destroy();
+            charts['monthlyChart'] = new Chart(ctxMonthly, {
+                type: 'bar',
+                data: {
+                    labels: sortedMonths,
+                    datasets: stackedDatasets
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { stacked: (targetMonthlyCat === 'ALL'), beginAtZero: true }, 
+                        y: { stacked: (targetMonthlyCat === 'ALL') }                     
+                    },
+                    plugins: {
+                        legend: { display: true, position: 'top' },
+                        datalabels: {
+                            color: '#ffffff', font: { weight: 'bold', size: 10 }, anchor: 'center', align: 'center',
+                            formatter: (value) => value > 50 ? '¥' + value.toLocaleString() : ''
+                        }
+                    }
+                },
+                plugins: [whiteBackgroundPlugin]
+            });
+
+            // 1. 全体収益ランキング (Top 5)
+            const sortedItemsRev = Object.keys(itemsRev).sort((a, b) => itemsRev[b] - itemsRev[a]).slice(0, 5);
+            const itemRevBgColors = sortedItemsRev.map(title => typeColors[globalItemTypes[title]] ? typeColors[globalItemTypes[title]].bg : defaultColor.bg);
+            const itemRevBorderColors = sortedItemsRev.map(title => typeColors[globalItemTypes[title]] ? typeColors[globalItemTypes[title]].border : defaultColor.border);
+            createChart('itemChart', 'bar', sortedItemsRev, sortedItemsRev.map(i => itemsRev[i]), '収益 (円)', 
+                { bg: itemRevBgColors, border: itemRevBorderColors }, { indexAxis: 'y', layout: { padding: { right: 50 } } });
+
+            // 2. 全体販売数ランキング (Top 5)
+            const sortedItemsCount = Object.keys(itemsCount).sort((a, b) => itemsCount[b] - itemsCount[a]).slice(0, 5);
+            const itemCountBgColors = sortedItemsCount.map(title => typeColors[globalItemTypes[title]] ? typeColors[globalItemTypes[title]].bg : defaultColor.bg);
+            const itemCountBorderColors = sortedItemsCount.map(title => typeColors[globalItemTypes[title]] ? typeColors[globalItemTypes[title]].border : defaultColor.border);
+            createChart('salesCountChart', 'bar', sortedItemsCount, sortedItemsCount.map(i => itemsCount[i]), '販売数', 
+                { bg: itemCountBgColors, border: itemCountBorderColors }, { indexAxis: 'y', layout: { padding: { right: 40 } } });
+
+            // 3. 種類シェア（パイグラフ）
+            const typeLabels = Object.keys(types).sort((a, b) => types[b] - types[a]);
+            const typeBgColors = typeLabels.map(t => typeColors[t] ? typeColors[t].bg : defaultColor.bg);
+            const typeBorderColors = typeLabels.map(t => typeColors[t] ? typeColors[t].border : defaultColor.border);
+            const typeDisplayLabels = typeLabels.map(t => t === 'Sticker' ? 'スタンプ' : t === 'Emoji' ? '絵文字' : t === 'Theme' ? '着せかえ' : t);
+            createChart('typeChart', 'pie', typeDisplayLabels, typeLabels.map(t => types[t]), '種類別', 
+                { bg: typeBgColors, border: typeBorderColors });
+
+            // 4. カテゴリ別総売上比較
+            const catLabels = Object.keys(types).sort((a, b) => types[b] - types[a]);
+            const catValues = catLabels.map(t => types[t]);
+            const catColors = catLabels.map(label => typeColors[label] ? typeColors[label].bg : defaultColor.bg);
+            const catBorders = catLabels.map(label => typeColors[label] ? typeColors[label].border : defaultColor.border);
+            const catDisplayLabels = catLabels.map(t => t === 'Sticker' ? 'スタンプ' : t === 'Emoji' ? '絵文字' : t === 'Theme' ? '着せかえ' : t);
+            
+            const ctxSummary = document.getElementById('categorySummaryChart').getContext('2d');
+            if (charts['categorySummaryChart']) charts['categorySummaryChart'].destroy();
+            
+            const summaryConfig = {
+                type: 'bar',
+                data: {
+                    labels: catDisplayLabels, rawKeys: catLabels, 
+                    datasets: [{ label: 'カテゴリ総売上', data: catValues, backgroundColor: catColors, borderColor: catBorders, borderWidth: 1 }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+                    layout: { padding: { right: 100 } },
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: {
+                            color: '#374151', font: { weight: 'bold', size: 10 }, anchor: 'end', align: 'end',
+                            formatter: (value, context) => {
+                                if (value === 0) return '';
+                                const rawKey = context.chart.data.rawKeys[context.dataIndex];
+                                const count = categoryCounts[rawKey] || 0;
+                                return '¥' + value.toLocaleString() + ' (' + count.toLocaleString() + '個)';
+                            }
+                        }
+                    }
+                },
+                plugins: [whiteBackgroundPlugin]
+            };
+            charts['categorySummaryChart'] = new Chart(ctxSummary, summaryConfig);
+
+            // カテゴリ別ランキングの描画呼び出し
+            drawCategoryRankChart();
+        }
+
+        function drawCategoryRankChart() {
+            const targetType = categoryRankSelect.value;
+            const titleElement = document.getElementById('categoryRankChartTitle');
+            
+            if (!targetType) return;
+            const catLabelJa = targetType === 'Sticker' ? 'スタンプ' : targetType === 'Emoji' ? '絵文字' : targetType === 'Theme' ? '着せかえ' : targetType;
+            titleElement.textContent = `🏆 ${catLabelJa}売上ランキング (Top 5)`;
+
+            const items = currentItemsRevByType[targetType] || {};
+            const sortedItems = Object.keys(items).sort((a, b) => items[b] - items[a]).slice(0, 5);
+            const dataValues = sortedItems.map(i => items[i]);
+            
+            const color = typeColors[targetType] || defaultColor;
+
+            createChart('categoryRankChart', 'bar', sortedItems, dataValues, '収益 (円)', 
+                color, { indexAxis: 'y', layout: { padding: { right: 65 } } });
+        }
+    </script>
+</body>
+</html>
